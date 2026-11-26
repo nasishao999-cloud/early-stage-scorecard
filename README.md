@@ -2,6 +2,8 @@
 
 这是早期项目评估网页 v13。网页、样式、评分逻辑和报告导出代码都内嵌在 `index.html` 中。
 
+[打开在线版](https://early-stage-scorecard.nasishao999.chatgpt.site)
+
 ## 使用方法
 
 1. 在 GitHub 选择 **Code → Download ZIP**，解压后用 Chrome 打开 `index.html`。也可以在本地克隆仓库后直接打开，无需构建。
@@ -9,3 +11,7 @@
 3. 查看分项评分和决策证据，按需补充复核资料并应用。最后下载 Word 或 TXT 报告，也可保存 JSON 草稿供下次打开。
 
 网页在浏览器中处理导入、评分和导出。草稿保存为本地 JSON 文件。
+
+## 许可证
+
+项目代码使用 [MIT 许可证](LICENSE)。内嵌库的许可文本和版权声明见[第三方许可与署名](THIRD_PARTY_NOTICES.md)。
