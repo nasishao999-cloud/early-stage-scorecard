@@ -25544,7 +25544,8 @@ var __async = (__this, __arguments, generator) => {
   const language = { value: 'zh-CN', eastAsia: 'zh-CN' };
 
   const value = (text, fallback = '待核验') => text || fallback;
-  function bodyParagraph(line) {
+  const reportParagraph = (options) => new Paragraph({ alignment: AlignmentType.LEFT, ...options });
+  function linkedRuns(line, textOptions = {}) {
     const children = [];
     let cursor = 0;
     for (const match of line.matchAll(/https?:\/\/[^\s<>"“”‘’。，、；：！？（）【】《》「」『』…\u3400-\u9fff]+/gi)) {
@@ -25557,27 +25558,28 @@ var __async = (__this, __arguments, generator) => {
       try { hostname = new URL(address).hostname; }
       catch { continue; }
       if (!hostname) continue;
-      if (match.index > cursor) children.push(new TextRun(line.slice(cursor, match.index)));
+      if (match.index > cursor) children.push(new TextRun({ ...textOptions, text: line.slice(cursor, match.index) }));
       children.push(new ExternalHyperlink({
         link: address,
         children: [new TextRun({ text: hostname.replace(/^www\./i, ''), style: 'Hyperlink' })]
       }));
       cursor = match.index + address.length;
     }
-    if (!children.length) return new Paragraph({ text: line });
-    if (cursor < line.length) children.push(new TextRun(line.slice(cursor)));
-    return new Paragraph({ alignment: AlignmentType.LEFT, children });
+    if (cursor < line.length || !children.length) {
+      children.push(new TextRun({ ...textOptions, text: line.slice(cursor) }));
+    }
+    return children;
   }
   const body = (text) => String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-    .map(bodyParagraph);
+    .map((line) => reportParagraph({ children: linkedRuns(line) }));
   const headingStyles = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4];
-  const heading = (text, level = 0) => new Paragraph({
+  const heading = (text, level = 0) => reportParagraph({
     text, heading: headingStyles[level], numbering: { reference: headingNumbering, level }
   });
   const h2 = (text) => heading(text, 1);
   const h3 = (text) => heading(text, 2);
   const h4 = (text) => heading(text, 3);
-  const note = (text) => new Paragraph({ text, style: 'SecondaryText' });
+  const note = (text) => reportParagraph({ text, style: 'SecondaryText' });
 
   function table(rows, widths, leftColumns) {
     const border = { style: BorderStyle.SINGLE, size: 4, color: 'D9D9D9' };
@@ -25594,11 +25596,13 @@ var __async = (__this, __arguments, generator) => {
           width: { size: widths[column], type: WidthType.DXA },
           verticalAlign: VerticalAlign.CENTER,
           shading: { fill: index === 0 ? '253A4E' : index % 2 === 0 ? 'F4F6F8' : 'FFFFFF' },
-          children: [new Paragraph({
+          children: [reportParagraph({
             alignment: leftColumns.includes(column) ? AlignmentType.LEFT : AlignmentType.CENTER,
             style: 'TableText',
             keepNext: rows.length <= 10 && index < rows.length - 1,
-            children: [new TextRun({ text: String(text), bold: index === 0, color: index === 0 ? 'FFFFFF' : '20252A' })]
+            children: index > 0 && leftColumns.includes(column)
+              ? linkedRuns(String(text), { color: '20252A' })
+              : [new TextRun({ text: String(text), bold: index === 0, color: index === 0 ? 'FFFFFF' : '20252A' })]
           })]
         }))
       }))
@@ -25623,7 +25627,7 @@ var __async = (__this, __arguments, generator) => {
         severityLabel[entry.severity] && ('严重度 ' + severityLabel[entry.severity])].filter(Boolean).join(' · ');
       const entryFacts = body(entry.fact);
       return [
-        new Paragraph({
+        reportParagraph({
           keepNext: entryFacts.length > 0,
           style: 'SourceText',
           children: [new TextRun({ text: label + '  ' }), source, ...(metadata ? [new TextRun({ text: '  ·  ' + metadata })] : [])]
@@ -25698,12 +25702,12 @@ var __async = (__this, __arguments, generator) => {
       withEvidence, summary, background, sections, nextSteps, priorityQuestions, decisionRows, modelSummary } = data;
     const title = value(project.name, '未命名项目') + ' AI 项目初筛报告';
     const children = [
-      new Paragraph({ text: title, heading: HeadingLevel.TITLE }),
+      reportParagraph({ text: title, heading: HeadingLevel.TITLE }),
       note('评估日期  ' + value(project.evaluationDate, '未提供') + '    ·    ' + (scoreState.confirmedCount ? '已人工复核 ' + scoreState.confirmedCount + '/18 项' : 'AI 初评待人工复核')),
       heading('一段话结论'),
       ...body(summary),
       heading(scoreState.confirmedCount ? '初筛结果（含人工复核）' : '初评结果'),
-      new Paragraph({
+      reportParagraph({
         children: [
           new TextRun({ text: scoreState.confirmedTotal.toFixed(2) + '／100', size: 36, bold: true }),
           new TextRun({ text: '    ' + verdict.label, size: 24, bold: true })
@@ -25740,7 +25744,7 @@ var __async = (__this, __arguments, generator) => {
       table([['评分项', '权重', '等级', '得分', 'AI 置信度'], ...SCORE_ITEMS.map((item) => scoreRow(item, scores, scoreAdjustments))],
         [4860, 1070, 1240, 1300, 1250], [0]),
       h2('评分等级说明'),
-      new Paragraph({ text: SCORE_LEVEL_NOTE, keepNext: true }),
+      reportParagraph({ text: SCORE_LEVEL_NOTE, keepNext: true }),
       table([['等级', '含义', '计入权重'], ...SCORE_LEVEL_GUIDE.map((level) => [level.label, level.description, level.percent + '%'])],
         [2520, 5840, 1360], [0, 1]),
       heading('附录  评分证据与风险'),
@@ -25772,7 +25776,7 @@ var __async = (__this, __arguments, generator) => {
         default: {
           document: {
             run: { font, language, size: 22, color: '20252A' },
-            paragraph: { spacing: { after: 92, line: 275 }, widowControl: true }
+            paragraph: { alignment: AlignmentType.LEFT, spacing: { after: 92, line: 275 }, widowControl: true }
           },
           title: { run: { ...black, size: 42 }, paragraph: { spacing: { after: 125 }, keepLines: true, keepNext: true } },
           heading1: { run: { ...black, size: 29 }, paragraph: { spacing: { before: 265, after: 95 }, keepNext: true, keepLines: true } },
@@ -25789,7 +25793,7 @@ var __async = (__this, __arguments, generator) => {
       sections: [{
         properties: { page: { size: page, margin } },
         footers: { default: new Footer({
-          children: [new Paragraph({
+          children: [reportParagraph({
             alignment: AlignmentType.RIGHT,
             children: [
               new TextRun({ text: 'AI 项目初筛报告   ·   ', color: '4C5862', size: 18 }),
