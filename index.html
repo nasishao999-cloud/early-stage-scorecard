@@ -1482,6 +1482,16 @@
       if (isObject(value.analysis)) for (const key of analysisKeys) {
         if (isNonEmptyString(value.analysis[key])) validation.value.analysis[key] = value.analysis[key].trim();
       }
+      const home = value.analysis?.homeSummary;
+      if (isObject(home)) {
+        const fields = ["macroHighlight", "macroRisk", "microHighlight", "microRisk", "nextCheck"];
+        const cleaned = Object.fromEntries(fields.filter((key) => isNonEmptyString(home[key]))
+          .map((key) => [key, home[key].trim()]));
+        if (Number.isInteger(home.nextCheckRule) && home.nextCheckRule >= 1 && home.nextCheckRule <= 7) {
+          cleaned.nextCheckRule = home.nextCheckRule;
+        }
+        if (Object.keys(cleaned).length) validation.value.analysis.homeSummary = cleaned;
+      }
       for (const key of missingMaturity) validation.value.evidenceMaturity[key] = "unverifiable";
       validation.value.diligenceQuestions = Array.from(new Set(value.diligenceQuestions.map((question) => question.trim()).filter(Boolean))).slice(0, 5);
       const noSourceCount = SCORE_IDS.filter((id) => !ratingEvidence(validation.value.scores[id]).length).length;
@@ -25697,15 +25707,48 @@ var __async = (__this, __arguments, generator) => {
     return warning.replace(/^交易信息 (\w+)/, (text, key) => labels[key] ? '交易信息中的' + labels[key] : text);
   }
 
+  function homeConclusion({ state, summary, scoreState, verdict }) {
+    const home = state.analysis?.homeSummary || {};
+    const sentence = (text) => text.trim().replace(/\s+/g, ' ').replace(/[。！？；;]+$/u, '') + '。';
+    const score = scoreState.confirmedTotal.toFixed(2) + '／100';
+    const count = scoreState.confirmedCount;
+    const currentScore = count
+      ? '当前总分 ' + score + '，已人工复核 ' + count + '/18 项。'
+      : 'AI 初评总分 ' + score + '。';
+    const risk = state.decisionFacts?.risk?.event;
+    const currentRisk = verdict.rule === 2 && risk ? '已核实红线为' + risk
+      : verdict.rule === 3 && risk ? '当前待核的重大风险涉及' + risk : home.microRisk;
+    const priority = {
+      1: '向项目方取得登记或主体关系说明，核对评估公司、本项目与拟投主体的对应',
+      2: '向原件出具方核对已触发红线的适用主体、原始记录及当前状态',
+      3: '向项目方和原始记录出具方取得风险原件及处置说明，核对影响范围',
+      4: scoreState.confirmedTotal < 50 ? '向项目方取得关键低分项的可核原件，确认是否有足以重评的新证据'
+        : '向实际客户取得合同、采购审批与到账凭证，核对实付和采购链能否对应同一客户',
+      5: verdict.checked.need.provisional && verdict.checked.need.type === 'noncore'
+        ? '向目标使用方取得需求记录或同一产品的测试及验收原件，核对人群、场景与产品是否一致'
+        : '向项目方取得具名客户的验证方案，核对具体任务和通过条件',
+      6: '向' + (state.decisionFacts?.customerUse?.customer || '实际客户') + '取得同一产品的使用或验收原件与付款凭证，核对两者能否对应',
+      7: '与' + (state.decisionFacts?.validation?.customer || '验证客户') + '确认试用任务，取得测试或验收记录并按约定条件判断结果'
+    };
+    const next = home.nextCheckRule === verdict.rule && ![2, 3].includes(verdict.rule)
+      ? home.nextCheck : '';
+    return sentence(summary) + currentScore
+      + '宏观层面，' + sentence(home.macroHighlight || '赛道的主要亮点待核')
+      + sentence(home.macroRisk || '影响进入的行业约束待核')
+      + '微观层面，' + sentence(home.microHighlight || '项目的主要亮点待核')
+      + sentence(currentRisk || '最影响去留的项目风险待核')
+      + '下一步，' + sentence(next || priority[verdict.rule] || '先补齐影响当前判断的原始材料');
+  }
+
   function createDocument(data) {
     const { state, project, scores, scoreAdjustments, vetoes, risks, scoreState, verdict, dimensions, confidence,
-      withEvidence, summary, background, sections, nextSteps, priorityQuestions, decisionRows, modelSummary } = data;
+      withEvidence, background, sections, nextSteps, priorityQuestions, decisionRows, modelSummary } = data;
     const title = value(project.name, '未命名项目') + ' AI 项目初筛报告';
     const children = [
       reportParagraph({ text: title, heading: HeadingLevel.TITLE }),
       note('评估日期  ' + value(project.evaluationDate, '未提供') + '    ·    ' + (scoreState.confirmedCount ? '已人工复核 ' + scoreState.confirmedCount + '/18 项' : 'AI 初评待人工复核')),
       heading('一段话结论'),
-      ...body(summary),
+      reportParagraph({ children: linkedRuns(homeConclusion(data)) }),
       heading(scoreState.confirmedCount ? '初筛结果（含人工复核）' : '初评结果'),
       reportParagraph({
         children: [
@@ -25888,6 +25931,9 @@ var __async = (__this, __arguments, generator) => {
     template.scores = Object.fromEntries(SCORE_ITEMS.map(({ id }) => [id, {
       ...template.scores[id], supportingEvidence: [], counterEvidence: [], missingItems: []
     }]));
+    template.analysis.homeSummary = {
+      macroHighlight: '', macroRisk: '', microHighlight: '', microRisk: '', nextCheck: '', nextCheckRule: null
+    };
     template.decisionFacts = emptyDecisionFacts();
     const fields = Object.entries(FACT_GROUPS).map(([key, group]) =>
       '- ' + key + '｜' + group.title + '｜' + group.fields.map(([field, label, type]) =>
@@ -25895,7 +25941,14 @@ var __async = (__this, __arguments, generator) => {
       ).concat(group.lists.map(([field, label]) => field + ' ' + label + '（证据数组）')).join('、')
     ).join('\n');
     const evidenceTypes = Object.entries(FACT_SOURCE_TYPES).map(([id, label]) => id + '=' + label).join('；');
-    return PROMPT_BODY + '\n\n【网页复核字段】\n'
+    return PROMPT_BODY + '\n\n【Word 首页摘要素材】\n'
+      + '在 analysis.homeSummary 填写五条简短文字，每条写一句，使用正文中能定位的证据。'
+      + 'macroHighlight 写行业需求、技术、政策或成本变化带来的具体机会。macroRisk 写最影响本项目的行业门槛、预算、竞争或时机约束。'
+      + 'microHighlight 写项目已展示的产品能力、客户行为或商业进展。microRisk 写最可能改变处理建议的项目风险或证据缺口。'
+      + '只有 BP 自述时标明「BP 披露」，原件或事实未核时写「待核」。缺少可靠线索的字段可留空。'
+      + 'nextCheck 只写一项优先核验动作，写清找谁、取哪份原件、验证什么，直接以动作开头。nextCheckRule 填该动作所对应的首个命中规则编号（1–7）。'
+      + '网页在导出时补入按当前规则算出的处理建议、总分与人工复核项数，并将上述信息合成一个自然段。'
+      + '\n\n【网页复核字段】\n'
       + 'decisionFacts.version 固定为 1。金额为正数，缺则 null，到账日期为 YYYY-MM-DD，缺则空。未知文字留空。'
       + '每条证据写 type、source、locator、fact，依次为来源类型、实际来源或原始取证主体、页码/编号/链接、它直接支持的事实。'
       + '二手来源的 source 填可识别的原始取证主体，同一原稿转发使用同一 source。实付 document 和 receipt 的每条凭证另外附 transactionId，须与本组交易编号一致。实付与采购链的客户名称应对应。'
