@@ -26115,6 +26115,7 @@ var __async = (__this, __arguments, generator) => {
   function setImportedAssessment(result, adjustments = {}) {
     imported = result.value;
     importWarnings = result.warnings;
+    $('import-warnings').open = importWarnings.length > 0;
     scoreAdjustments = adjustments;
     scoreEdits.clear();
     $('score-groups').replaceChildren();
