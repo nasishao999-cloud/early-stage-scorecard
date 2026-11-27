@@ -25544,8 +25544,32 @@ var __async = (__this, __arguments, generator) => {
   const language = { value: 'zh-CN', eastAsia: 'zh-CN' };
 
   const value = (text, fallback = '待核验') => text || fallback;
+  function bodyParagraph(line) {
+    const children = [];
+    let cursor = 0;
+    for (const match of line.matchAll(/https?:\/\/[^\s<>"“”‘’。，、；：！？（）【】《》「」『』…\u3400-\u9fff]+/gi)) {
+      let address = match[0].replace(/[.,;:!?]+$/, '');
+      while (address.endsWith(')') && address.split(')').length > address.split('(').length) {
+        address = address.slice(0, -1);
+      }
+      if (address.length <= 60) continue;
+      let hostname;
+      try { hostname = new URL(address).hostname; }
+      catch { continue; }
+      if (!hostname) continue;
+      if (match.index > cursor) children.push(new TextRun(line.slice(cursor, match.index)));
+      children.push(new ExternalHyperlink({
+        link: address,
+        children: [new TextRun({ text: hostname.replace(/^www\./i, ''), style: 'Hyperlink' })]
+      }));
+      cursor = match.index + address.length;
+    }
+    if (!children.length) return new Paragraph({ text: line });
+    if (cursor < line.length) children.push(new TextRun(line.slice(cursor)));
+    return new Paragraph({ alignment: AlignmentType.LEFT, children });
+  }
   const body = (text) => String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-    .map((line) => new Paragraph({ text: line }));
+    .map(bodyParagraph);
   const headingStyles = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4];
   const heading = (text, level = 0) => new Paragraph({
     text, heading: headingStyles[level], numbering: { reference: headingNumbering, level }
