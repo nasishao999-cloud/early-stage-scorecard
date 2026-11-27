@@ -637,14 +637,14 @@
       </div><div class="transaction"><h3>可选交易信息</h3><div class="grid-3"><label class="field">本轮投前估值（万元）<input id="preMoney" type="number" min="0" step="any"></label><label class="field">本轮融资金额（万元）<input id="financingAmount" type="number" min="0" step="any"></label><label class="field">拟投资金额（万元）<input id="investmentAmount" type="number" min="0" step="any"></label><label class="field">预期持股区间（%）<span class="split-input"><input id="expectedOwnershipMin" aria-label="预期持股下限" type="number" min="0" max="100"><input id="expectedOwnershipMax" aria-label="预期持股上限" type="number" min="0" max="100"></span></label><label class="field">到下一关键价值拐点的预计资金需求（万元）<input id="capitalToMilestone" type="number" min="0" step="any"></label><label class="field wide">本轮估值依据<textarea id="valuationRationale" rows="2"></textarea></label></div></div></div></section>
 <section id="ai" aria-labelledby="ai-heading">
   <h2 id="ai-heading">AI 分析导入</h2>
-  <p>将提示词和可分享的项目资料交给联网 AI，使用模型回复下方的复制按钮，把完整回复粘贴到这里。</p>
+  <p>将提示词和可分享的项目资料交给联网 AI，把完整回复或其中的完整 JSON 粘贴到这里。</p>
   <button id="copy-ai-prompt" type="button">生成并复制 AI 提示词</button>
   <span id="prompt-status" aria-live="polite"></span>
   <details id="prompt-preview">
     <summary>查看提示词</summary>
     <textarea id="ai-prompt-text" aria-label="AI 提示词" rows="10" readonly></textarea>
   </details>
-  <label for="ai-result-json">AI 完整回复或旧版 JSON</label>
+  <label for="ai-result-json">AI 完整回复或 JSON</label>
   <textarea id="ai-result-json" rows="9" spellcheck="false"></textarea>
   <button id="import-ai-result" type="button">校验并导入</button>
   <p id="ai-import-status" role="status">尚未导入。</p>
@@ -25962,14 +25962,28 @@ var __async = (__this, __arguments, generator) => {
   }
 
   function extractScreeningReply(input) {
-    const raw = extractPayload(input);
-    if (!Object.hasOwn(raw, 'decisionFacts')) return raw;
-    const match = /^([^\r\n]+)\r?\n\s*\x60\x60\x60json[ \t]*\r?\n([\s\S]*?)\r?\n\x60\x60\x60$/i.exec(input.trim());
-    if (!match || match[1].trim() !== raw.analysis?.summary) {
-      throw new Error('新版回复须先给一句与 analysis.summary 相同的结论，再附一个 JSON 围栏。');
+    const text = input.trim();
+    if (text.startsWith('{')) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        // Let the existing parser handle legacy replies and report invalid JSON.
+      }
     }
-    JSON.parse(match[2]);
-    return raw;
+    const raw = extractPayload(text);
+    if (!Object.hasOwn(raw, 'decisionFacts')) return raw;
+    const match = /^(?:([^\r\n]+)\r?\n\s*)?\x60\x60\x60(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n\x60\x60\x60$/i.exec(text);
+    if (!match) throw new Error('请粘贴一个完整的 JSON 对象、一个 JSON 代码块，或 AI 的整条回复。');
+    let payload;
+    try {
+      payload = JSON.parse(match[2]);
+    } catch {
+      throw new Error('无法解析代码块中的完整 JSON。请检查是否复制了整个代码块。');
+    }
+    if (match[1] && match[1].trim() !== payload?.analysis?.summary) {
+      throw new Error('回复首句与 analysis.summary 不一致。可以直接复制 JSON 代码块再导入。');
+    }
+    return payload;
   }
 
   let decisionFacts = emptyDecisionFacts();
